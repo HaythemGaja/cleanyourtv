@@ -1,0 +1,60 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.gathin.tvhome'
+    compileSdk 34
+
+    defaultConfig {
+        // Opt-in identity for firmware with a package-name HOME allowlist; see docs/devices/xiaomi-mitv-aetp0-dofus.md.
+        applicationId providers.gradleProperty('launcherApplicationId').getOrElse('com.gathin.tvhome')
+        minSdk 26
+        targetSdk 34
+        // Fork: versionCode 43 / 3.20 — above Sreeb v3.19 (vc42) so this installs as a normal update.
+        versionCode 43
+        versionName '3.20'
+    }
+
+    signingConfigs {
+        // Fork: the existing Sreeb key. Passwords come ONLY from the environment (never in this file):
+        // SREEB_KEYSTORE (or the absolute default below), SREEB_STORE_PASSWORD, SREEB_KEY_PASSWORD.
+        // The keystore itself must never enter any repo.
+        sreeb {
+            storeFile file(System.getenv('SREEB_KEYSTORE') ?: '/home/hatch/workspace/.keystores/mizanlauncher-debug.keystore')
+            storePassword System.getenv('SREEB_STORE_PASSWORD')
+            keyAlias 'mizanlauncher'
+            keyPassword System.getenv('SREEB_KEY_PASSWORD')
+        }
+    }
+
+    buildTypes {
+        release {
+            // Fork: minify/shrink OFF, as Sreeb ships — avoids R8 risk on the new tracker/lock/remote code
+            // and keeps the fork's new classes verifiable in the built dex.
+            minifyEnabled false
+            shrinkResources false
+            signingConfig signingConfigs.sreeb
+        }
+    }
+
+    packagingOptions {
+        resources {
+            // Kotlin metadata pulled in by AndroidX's dependencies. This launcher is plain Java and never reads it;
+            // leaving it out saves about 14 KB of every install.
+            excludes += ['kotlin/**', 'META-INF/*.version', 'META-INF/*.kotlin_module', 'DebugProbesKt.bin']
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.dynamicanimation:dynamicanimation:1.0.0'
+    // Test only (never in the APK): plain JVM tests for the module card validators, src/test.
+    testImplementation 'junit:junit:4.13.2'
+}
