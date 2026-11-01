@@ -11,9 +11,9 @@ android {
         applicationId providers.gradleProperty('launcherApplicationId').getOrElse('com.gathin.tvhome')
         minSdk 26
         targetSdk 34
-        // Fork: versionCode 43 / 3.20 — above Sreeb v3.19 (vc42) so this installs as a normal update.
-        versionCode 43
-        versionName '3.20'
+        // Fork: versionCode 44 / 3.21 — scrollable home fix above Sreeb v3.20 (vc43).
+        versionCode 44
+        versionName '3.21'
     }
 
     signingConfigs {
@@ -54,6 +54,7 @@ android {
 
 dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'androidx.core:core:1.12.0'
     implementation 'androidx.dynamicanimation:dynamicanimation:1.0.0'
     // Test only (never in the APK): plain JVM tests for the module card validators, src/test.
     testImplementation 'junit:junit:4.13.2'

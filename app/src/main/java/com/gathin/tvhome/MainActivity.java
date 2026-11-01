@@ -72,6 +72,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.core.widget.NestedScrollView;
 import androidx.dynamicanimation.animation.FloatPropertyCompat;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
@@ -312,7 +313,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     // ---- Fork additions: Sreeb tracker sections, arrow lock gate, phone remote ----
     private SreebPrefs forkSreebPrefs;
     private PosterLoader forkPosters;
-    private LinearLayout forkTrackerContainer;
+    // v3.21: the tracker sections live inside a scroll view (see buildTrackerSections),
+    // so this is the scroll wrapper, not the section container itself.
+    private View forkTrackerContainer;
     private boolean forkTrackerDirty = true;
     private boolean forkTrackerBuilding = false;
     /** Reorder mode is on (top-bar button). */
@@ -1001,8 +1004,29 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                                     new TrackerStore(getFilesDir()), this::rebuildTrackerSections));
                     int at = column.indexOfChild((View) grid.getParent());
                     if (at < 0) at = 0;
-                    column.addView(container, at);
-                    forkTrackerContainer = container;
+                    // v3.21 fix (fork v3.20 on-device bug: home not scrollable, grid
+                    // invisible, lock never reached): the v3.20 container was inserted
+                    // bare into the column above the grid wrapper. The column is a
+                    // vertical LinearLayout whose grid wrapper is weight=1/height=0,
+                    // so a tall tracker container left the grid ZERO height: no tiles
+                    // laid out, nothing to scroll, no tile click ever reached the
+                    // lock gate. The fix keeps the upstream geometry (header +
+                    // weight=1 grid) and shares the leftover height equally: the
+                    // tracker sections go inside a NestedScrollView with weight 1,
+                    // so the grid always keeps half the leftover height and its own
+                    // RecyclerView scrolling, while the tracker rows scroll inside
+                    // their half. D-pad DOWN from the tracker exits through the
+                    // Add-show button, which carries nextFocusDownId=grid (set in
+                    // TrackerUi); UP from the first grid row falls back to default
+                    // focus search, which lands on the nearest tracker child above.
+                    NestedScrollView scroll = new NestedScrollView(this);
+                    scroll.setLayoutParams(new LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+                    scroll.setFillViewport(true);
+                    scroll.setVerticalScrollBarEnabled(false);
+                    scroll.addView(container);
+                    column.addView(scroll, at);
+                    forkTrackerContainer = scroll;
                 }
                 forkTrackerBuilding = false;
                 if (forkTrackerDirty) rebuildTrackerSections();

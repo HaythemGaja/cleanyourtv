@@ -103,3 +103,21 @@ Store `filesDir/tracker/`: titles.jsonl, upnext.txt, continue.txt,
 movies.txt, foryou.txt, missed.txt, missed.json, index.json,
 episodes/tv_<tmdbId>.json. Fork-owned prefs: `clean_fork_state`
 (lastRefreshMs, remoteTheme). Fork disk cache: `filesDir/posters/`.
+
+## v3.21 — scrollable home fix (on-device bug from v3.20)
+
+v3.20 put the tracker container bare into the home column above the
+grid wrapper. The column is a vertical LinearLayout and the grid
+wrapper is weight=1/height=0, so a tall tracker container left the
+grid ZERO height: no tiles visible, nothing scrollable, and no tile
+click ever reached the lock gate (the gate itself was wired fine).
+v3.21 wraps the tracker container in a NestedScrollView that itself
+carries weight=1/height=0, so the column's leftover height is shared
+equally: the grid always keeps half, with its own RecyclerView
+scrolling, and the tracker rows scroll inside their half. D-pad DOWN
+from the tracker exits through the Add-show button (always the last
+tracker child, nextFocusDownId=grid); UP from the first grid row uses
+default focus search back to the nearest tracker child. No layout,
+theme, remote, permission, or lock-logic changes; tracker rows stay
+on the home under every theme by design. Folders are still out of
+scope (the base has no folder UI).

@@ -24,7 +24,10 @@ import java.util.Map;
 /**
  * Tracker home sections for the fork: Hero → Up Next →
  * Missed → For You, then the fork's normal app grid below
- * (the container is inserted above the grid by MainActivity).
+ * (the container is wrapped in a scroll view and inserted above
+ * the grid by MainActivity, v3.21: scroll view and grid wrapper
+ * share the leftover height equally, so the grid is never
+ * squeezed to zero).
  *
  * Data comes from TrackerData, prepared by MainActivity
  * from the shared Sreeb store files (already filtered for
@@ -184,6 +187,10 @@ final class TrackerUi {
 
         TextView add = text(act, act.getString(R.string.tracker_add_show), 16, 0xFFFFFFFF, false);
         add.setFocusable(true);
+        // v3.21: the Add-show button is always the last focusable child of the
+        // tracker container, so it is the D-pad exit: DOWN from here must land
+        // on the apps grid (which sits below the tracker scroll view).
+        add.setNextFocusDownId(R.id.grid);
         add.setPadding(0, dp(act, 12), 0, dp(act, 12));
         add.setOnClickListener(v -> onAddShow.run());
         root.addView(add);

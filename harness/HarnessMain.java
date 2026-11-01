@@ -41,8 +41,58 @@ public final class HarnessMain {
         protocol();
         store();
         theme(args.length > 0 ? args[0] : null);
+        layout();
         System.out.println("RESULT passed=" + passed + " failed=" + failed);
         if (failed > 0) System.exit(1);
+    }
+
+    // ---------------- v3.21 home scroll + focus fix ----------------
+
+    private static void layout() {
+        // Split math: the v3.20 bug squeezed the grid to exactly 0.
+        TrackerLayout.Split s1080 = TrackerLayout.computeSplit(1080, 200);
+        checkEq("1080p split tracker half", 440, s1080.trackerH);
+        checkEq("1080p split grid half", 440, s1080.gridH);
+        TrackerLayout.Split s720 = TrackerLayout.computeSplit(720, 140);
+        checkEq("720p split grid", 290, s720.gridH);
+        check("grid never zero at 1080p", TrackerLayout.gridHasHeight(1080, 200));
+        check("grid never zero at 720p", TrackerLayout.gridHasHeight(720, 140));
+        check("grid never zero at 480p", TrackerLayout.gridHasHeight(480, 100));
+        check("grid never zero, header = screen - 1", TrackerLayout.gridHasHeight(1080, 1079));
+        check("grid keeps quarter screen at 1080p", TrackerLayout.gridKeepsQuarterScreen(1080, 200));
+        check("grid keeps quarter screen at 720p", TrackerLayout.gridKeepsQuarterScreen(720, 140));
+        check("old geometry squeezed grid to zero (regression model)",
+                1080 - 200 - 1000 <= 0);
+        // Focus chain: tracker items then grid tiles, one column.
+        check("DOWN from last tracker lands on first tile",
+                TrackerLayout.downExitsTrackerToGrid(12, 24));
+        check("UP from first tile returns to last tracker item",
+                TrackerLayout.upReturnsToTracker(12, 24));
+        check("DOWN walk from top reaches every tile, no trap",
+                TrackerLayout.downWalkReachesAllTiles(12, 24));
+        check("DOWN walk with one tracker item reaches every tile",
+                TrackerLayout.downWalkReachesAllTiles(1, 8));
+        check("DOWN walk with empty tracker still reaches tiles",
+                TrackerLayout.downWalkReachesAllTiles(0, 8));
+        check("focus DOWN from invalid index leaves column",
+                TrackerLayout.focusDown(null, 0, 8, -1) == -1);
+        check("focus DOWN past last tile leaves column",
+                TrackerLayout.focusDown(null, 3, 4, 6) == -1);
+        check("focus UP past first item leaves column",
+                TrackerLayout.focusUp(3, 4, 0) == -1);
+        // Lock gate routing (the v3.20 lock was wired but unreachable):
+        // locked + enabled -> prompt; unlocked or disabled -> direct launch.
+        check("locked tile + lock on -> prompt",
+                ArrowLock.appRequiresPrompt(true, true));
+        check("unlocked tile -> direct launch",
+                !ArrowLock.appRequiresPrompt(false, true));
+        check("locked tile + lock off -> direct launch",
+                !ArrowLock.appRequiresPrompt(true, false));
+        check("grace window passes without prompt",
+                ArrowLock.withinGrace(30, System.currentTimeMillis(), System.currentTimeMillis()));
+        check("expired grace -> prompt again",
+                !ArrowLock.withinGrace(30, System.currentTimeMillis() - 31L * 60 * 1000,
+                        System.currentTimeMillis()));
     }
 
     // ---------------- codecs ----------------
