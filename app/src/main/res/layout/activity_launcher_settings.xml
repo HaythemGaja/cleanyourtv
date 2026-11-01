@@ -175,5 +175,11 @@
             style="@style/SettingsRow"
             android:layout_marginTop="18dp"
             android:text="@string/phone_remote_title" />
+
+        <TextView
+            android:id="@+id/lockPinChoice"
+            style="@style/SettingsRow"
+            android:layout_marginTop="18dp"
+            android:text="@string/lock_pin_title" />
     </LinearLayout>
 </ScrollView>

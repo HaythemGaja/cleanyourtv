@@ -176,6 +176,8 @@ public final class LauncherSettingsActivity extends Activity {
                 open(SystemSettings.intent(this, Settings.ACTION_SETTINGS)));
         // Fork: phone remote (Sreeb Remote app, same protocol/pairing code as Sreeb v3.19).
         findViewById(R.id.phoneRemoteChoice).setOnClickListener(v -> showPhoneRemote());
+        // Fork v3.22: on-TV lock & PIN setup (code + locked-apps count, no remote needed).
+        findViewById(R.id.lockPinChoice).setOnClickListener(v -> showLockPin());
         refresh();
         if (config.launcherSettingsButton) reorderChoice.requestFocus();
         else columnChoices[Math.max(0, Math.min(columns - 4, 3))].requestFocus();
@@ -363,6 +365,84 @@ public final class LauncherSettingsActivity extends Activity {
                     prefs.setRemoteEnabled(false);
                     prefs.setPairingCode(ForkRemoteServer.generateCode());
                 })
+                .show();
+    }
+
+    /** Fork v3.22: on-TV lock & PIN. Set/change requires the current code first (Sreeb's pattern);
+     *  clear requires it too. The code itself is never shown. Writes go only to the arrow-code
+     *  key in Sreeb prefs — the locked set is managed from the tile menu. */
+    private void showLockPin() {
+        SreebPrefs prefs = new SreebPrefs(this);
+        String code = prefs.arrowPin();
+        boolean codeSet = code != null && !code.isEmpty() && ArrowLock.isValidEncoded(code);
+        if (code != null && !code.isEmpty() && !codeSet) prefs.setArrowPin("");
+        String msg = getString(R.string.lock_pin_status, prefs.lockedApps().size(),
+                getString(codeSet ? R.string.lock_pin_code_set : R.string.lock_pin_code_not_set));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.lock_pin_title)
+                .setMessage(msg)
+                .setItems(new String[]{getString(R.string.lock_pin_set_change), getString(R.string.lock_pin_clear)},
+                        (d, which) -> {
+                            if (which == 0) {
+                                if (codeSet) {
+                                    ArrowDialog.showUnlockSeq(this, getString(R.string.lock_unlock_title,
+                                                    getString(R.string.lock_pin_title)), code.length(),
+                                            new ArrowDialog.UnlockSeqCallback() {
+                                                @Override public void onSubmitted(String sequence) {
+                                                    if (sequence.equals(code)) {
+                                                        ArrowDialog.showSetup(LauncherSettingsActivity.this,
+                                                                getString(R.string.lock_set_title,
+                                                                        getString(R.string.lock_pin_title)),
+                                                                new ArrowDialog.SetupCallback() {
+                                                                    @Override public void onDone(String seq) {
+                                                                        prefs.setArrowPin(seq);
+                                                                        Toast.makeText(LauncherSettingsActivity.this,
+                                                                                R.string.lock_pin_saved, Toast.LENGTH_SHORT).show();
+                                                                    }
+                                                                    @Override public void onCancel() {}
+                                                                });
+                                                    } else {
+                                                        Toast.makeText(LauncherSettingsActivity.this,
+                                                                R.string.lock_wrong, Toast.LENGTH_SHORT).show();
+                                                    }
+                                                }
+                                                @Override public void onCancel() {}
+                                            });
+                                } else {
+                                    ArrowDialog.showSetup(this, getString(R.string.lock_set_title,
+                                                    getString(R.string.lock_pin_title)),
+                                            new ArrowDialog.SetupCallback() {
+                                                @Override public void onDone(String seq) {
+                                                    prefs.setArrowPin(seq);
+                                                    Toast.makeText(LauncherSettingsActivity.this,
+                                                            R.string.lock_pin_saved, Toast.LENGTH_SHORT).show();
+                                                }
+                                                @Override public void onCancel() {}
+                                            });
+                                }
+                            } else {
+                                if (!codeSet) {
+                                    Toast.makeText(this, R.string.lock_pin_no_code, Toast.LENGTH_SHORT).show();
+                                    return;
+                                }
+                                ArrowDialog.showUnlockSeq(this, getString(R.string.lock_unlock_title,
+                                                getString(R.string.lock_pin_title)), code.length(),
+                                        new ArrowDialog.UnlockSeqCallback() {
+                                            @Override public void onSubmitted(String sequence) {
+                                                if (sequence.equals(code)) {
+                                                    prefs.setArrowPin("");
+                                                    Toast.makeText(LauncherSettingsActivity.this,
+                                                            R.string.lock_pin_cleared, Toast.LENGTH_SHORT).show();
+                                                } else {
+                                                    Toast.makeText(LauncherSettingsActivity.this,
+                                                            R.string.lock_wrong, Toast.LENGTH_SHORT).show();
+                                                }
+                                            }
+                                            @Override public void onCancel() {}
+                                        });
+                            }
+                        })
+                .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 

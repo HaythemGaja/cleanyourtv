@@ -40,4 +40,18 @@ final class ForkState {
     void setRemoteTheme(String v) {
         sp.edit().putString("remote_theme", v == null ? "default" : v).apply();
     }
+
+    /** Folder definitions (FolderCodec encoding). Fork-owned: Sreeb never reads this file. */
+    String foldersRaw() {
+        try {
+            String v = sp.getString("folders", null);
+            return v == null ? "" : v;
+        } catch (ClassCastException e) {
+            return "";
+        }
+    }
+
+    void setFoldersRaw(String v) {
+        sp.edit().putString("folders", v == null ? "" : v).apply();
+    }
 }

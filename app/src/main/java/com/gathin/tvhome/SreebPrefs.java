@@ -34,10 +34,11 @@ import java.util.Set;
  * - "p<N>.unlock_grace_min" (default 0) + "last_unlock_at".
  *
  * All reads are defensive: a wrong-typed value falls back to
- * the default instead of throwing. The fork NEVER writes
- * lockedApps, layout, or the TMDB key — only the remote
- * flags/code, the arrow code (remote set / set-pattern flow),
- * and the unlock stamp.
+ * the default instead of throwing. The fork writes ONLY the
+ * remote flags/code, the arrow code (remote set / set-pattern
+ * flow), the unlock stamp, and — since v3.22, deliberately —
+ * the locked-apps set (tile-menu Lock/Unlock). It NEVER writes
+ * layout or the TMDB key.
  */
 final class SreebPrefs {
     private static final String FILE = "mizan_launcher";
@@ -66,6 +67,12 @@ final class SreebPrefs {
         } catch (ClassCastException e) {
             return Collections.emptySet();
         }
+    }
+
+    /** v3.22: tile-menu Lock/Unlock writes ONLY this key. Same file Sreeb reads, so the locks stay
+     *  consistent if the user ever returns to Sreeb. Nothing else in this file is touched here. */
+    void setLockedApps(Set<String> pkgs) {
+        sp.edit().putStringSet(k("locked"), pkgs == null ? new HashSet<>() : new HashSet<>(pkgs)).apply();
     }
 
     String layoutRaw() {

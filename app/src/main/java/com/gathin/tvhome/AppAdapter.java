@@ -61,12 +61,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         /** Hold OK on a tile: the activity shows the tile menu (move, remove from Home, app info). */
         void onTileLongPress(int position, View card);
         void onLibraryUp();
+        /** A folder tile was clicked: the activity opens the folder view. */
+        void onFolderRequested(String folderId);
         /** A tile whose launch_actions entry is "input:<id>": switch to that TV input instead of opening an app. */
         void onOpenInput(String inputId);
     }
 
     static final class Entry {
-        static final int APP = 0, HOME_SETTINGS = 1, CARD = 2, EMPTY = 3;
+        static final int APP = 0, HOME_SETTINGS = 1, CARD = 2, EMPTY = 3, FOLDER = 4;
 
         final int kind;
         final String label;
@@ -80,6 +82,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         int ambient;
         /** uniform_tiles card fill, top and bottom colour; null until sampled from the icon. */
         int[] backdrop;
+        /** Folder id for FOLDER entries, null otherwise. Component namespace is the synthetic "folder". */
+        String folderId;
 
         Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
             this(APP, label, component, banner, icon, null, 0);
@@ -94,6 +98,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             this.icon = icon;
             this.name = caption == null ? label : label + " \u00B7 " + caption;
             this.ambient = accent;
+        }
+
+        /** Folder tile: component is synthetic ("folder/folder:<id>"), never launched. */
+        Entry(String folderId, String label, Drawable icon, String caption) {
+            this(FOLDER, label, new ComponentName("folder", "folder:" + folderId), null, icon, caption, 0);
+            this.folderId = folderId;
         }
     }
 
@@ -227,6 +237,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Packages drawn from their icon and name even when they have a banner (config.xml icon_tiles). */
     private final Set<String> iconTiles;
     private final List<Entry> items = new ArrayList<>();
+    /** Fork v3.22: folder definitions applied at the next reload(); foldered apps hide as loose tiles. */
+    private List<FolderCodec.Folder> folderDefs = new ArrayList<>();
+    private Set<String> folderedPkgs = new HashSet<>();
+
+    void setFolderDefs(List<FolderCodec.Folder> folders) {
+        folderDefs = folders == null ? new ArrayList<>() : new ArrayList<>(folders);
+        folderedPkgs = FolderCodec.folderedPackages(folderDefs);
+    }
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
         this.ctx = ctx;
@@ -294,6 +312,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             String pkg = ri.activityInfo.packageName;
             if (pkg.equals(ctx.getPackageName()) || !ri.activityInfo.exported
                     || !LibraryApps.visible(tvPackages.contains(pkg), hidden.contains(pkg), added.contains(pkg), removed.contains(pkg))) continue;
+            // Fork v3.22: an app inside a folder hides as a loose tile (no duplicates on the home grid).
+            if (folderedPkgs.contains(pkg)) continue;
             ComponentName component = new ComponentName(pkg, ri.activityInfo.name);
             Cards.Card card = cardByPkg.get(pkg);
             if (card != null && !card.component.equals(component)) continue;   // the card stands in for this tile
@@ -332,6 +352,13 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             if (ca != cb) return ca ? -1 : 1;
             return a.label.compareToIgnoreCase(b.label);
         });
+        // Fork v3.22: folder tiles follow the apps (never docked — isDocked() only matches real apps),
+        // each showing a collage of up to four member icons. A folder with no members still opens.
+        for (FolderCodec.Folder f : folderDefs) {
+            String caption = f.members.isEmpty() ? "Empty"
+                    : f.members.size() == 1 ? "1 app" : f.members.size() + " apps";
+            fresh.add(new Entry(f.id, f.name, folderIcon(f.members), caption));
+        }
         // Retain the optional Default-home tile until dependent tile-ordering work is merged.
         if (showHomeSettings
                 && pm.resolveActivity(new Intent(Settings.ACTION_HOME_SETTINGS), 0) != null) {
@@ -359,6 +386,33 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         canvas.drawColor(0xFF15202B);
         icon.setBounds((w - side) / 2, (h - side) / 2, (w + side) / 2, (h + side) / 2);
         icon.draw(canvas);
+        return new android.graphics.drawable.BitmapDrawable(ctx.getResources(), bmp);
+    }
+
+    /** Fork v3.22: folder tile icon — up to four member icons in a 2x2 collage on the dark tile.
+     *  Unresolvable members are skipped; an empty folder gets the plain dark tile. */
+    private Drawable folderIcon(List<String> members) {
+        int w = 320, h = 180, side = 78, gap = 10;
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+        canvas.drawColor(0xFF15202B);
+        List<Drawable> icons = new ArrayList<>();
+        PackageManager pm = ctx.getPackageManager();
+        for (String pkg : members) {
+            if (icons.size() >= 4) break;
+            try {
+                icons.add(pm.getApplicationIcon(pkg));
+            } catch (Exception ignored) {
+            }
+        }
+        for (int i = 0; i < icons.size(); i++) {
+            int col = i % 2, row = i / 2;
+            int x0 = (w - (2 * side + gap)) / 2 + col * (side + gap);
+            int y0 = (h - (2 * side + gap)) / 2 + row * (side + gap);
+            Drawable d = icons.get(i);
+            d.setBounds(x0, y0, x0 + side, y0 + side);
+            d.draw(canvas);
+        }
         return new android.graphics.drawable.BitmapDrawable(ctx.getResources(), bmp);
     }
 
@@ -534,6 +588,11 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Opens the tile's activity by explicit component, with no extras: a card can name nothing else. */
     @SuppressWarnings("deprecation")
     private void launch(Entry e) {
+        // Fork v3.22: a folder tile opens the folder view, never a launch (and never the lock gate).
+        if (e.kind == Entry.FOLDER) {
+            listener.onFolderRequested(e.folderId);
+            return;
+        }
         // Fork: app-tile launches pass through the arrow lock gate first. The launcher's own settings
         // tile is never gated, and the gate runs before any custom launch action resolves.
         if (launchGate != null && e.kind != Entry.HOME_SETTINGS) {
@@ -656,6 +715,14 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     /** Stable key for the app at a position (its component), or null. */
     String keyAt(int position) {
         return position >= 0 && position < items.size() ? items.get(position).component.flattenToShortString() : null;
+    }
+
+    int entryKindAt(int position) {
+        return position >= 0 && position < items.size() ? items.get(position).kind : -1;
+    }
+
+    String folderIdAt(int position) {
+        return position >= 0 && position < items.size() ? items.get(position).folderId : null;
     }
 
     /** Position of the app with this key, or -1 when it is gone. */

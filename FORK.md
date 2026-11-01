@@ -121,3 +121,64 @@ default focus search back to the nearest tracker child. No layout,
 theme, remote, permission, or lock-logic changes; tracker rows stay
 on the home under every theme by design. Folders are still out of
 scope (the base has no folder UI).
+
+## v3.22 — folders + on-TV lock setup (+ Sreeb icon)
+
+Folders are new UI on the fork base (the base has no folder concept):
+folder definitions live in the fork-owned prefs file `clean_fork_state`
+(key `folders`, `FolderCodec` pipe encoding — one folder per line:
+id | name | locked 0/1 | member packages; malformed lines drop,
+the rest survive). A folder tile shows the folder name, an app count,
+and a collage of up to four member icons. Foldered apps never appear
+as loose tiles on the main grid (no duplicates); the all-apps/library
+picker (`AppLibraryDialog`) is unchanged, so members still appear
+there. Opening a folder tile shows its members in a dialog grid;
+BACK closes it and refocuses the folder tile. Hold OK on a tile gives
+"Add to folder" (existing folder or "New folder" with the default
+name "Folder N", smallest unused; rename is implemented via an
+EditText dialog from the folder tile menu). Inside the folder view,
+long-press a member to remove it (it returns to the main grid);
+the folder tile menu offers Delete (members return to the grid;
+an empty folder still opens with an empty hint and the delete
+option). Foldered apps are never docked (dock matching only accepts
+real apps). Stale members (uninstalled apps) are pruned on open and
+the prune is persisted.
+
+Folder lock gating wires the dormant `ArrowLock.folderGate` live:
+locked + code set prompts for the code; locked + no code runs the
+set-pattern flow first and then REQUIRES the new code (unlike the
+app gate's setup-then-open — a folder with no code is a setup
+accident, not a legacy lock); unlocked or remote folder-lock master
+off opens; the shared unlock-grace window is honored (no second
+grace invented). Folder lock toggles live in the folder tile menu.
+
+On-TV PIN lock setup: the tile menu gains "Lock app" / "Unlock app"
+(toggling the Sreeb prefs `p<N>.locked` set) and Settings gains a
+"Lock & PIN" row (set/change code — changing requires the current
+code first, per Sreeb's pattern; clear requires it too; locked-apps
+count shown; the code itself is never displayed). Locking an app
+while no code is set forces the set-pattern flow first, then applies
+the lock — never a locked app with no code. This is a DELIBERATE
+new write into Sreeb prefs (v3.20 deliberately never wrote
+lockedApps): the fork now writes ONLY the locked set and the arrow
+code there, nothing else, so locks stay consistent if the user ever
+returns to Sreeb. Lock code format (UDLR 4–8), grace keys, remote
+master flags, and remote setArrowCode behavior are unchanged; the
+remote's setAppLock/setFolderLock toggles keep working (master off
+suspends gating for apps/folders respectively). The app gate's
+locked+no-code behavior is UNCHANGED: setup-then-open, fail-open.
+
+Icon (applied to the tree before this build, verified in the APK):
+the upstream CleanYourTV wavy mark is replaced by the Sreeb house
+mark — bold red #E50914 geometric S on near-black #141414, as
+vectors copied from the Sreeb launcher (mipmap-anydpi-v26
+adaptive icon + drawable ic_launcher/background/foreground +
+banner.xml TV banner). The wavy jpg and the upstream banner jpg
+are deleted with no dangling references; manifest icon/banner
+lines are unchanged; minSdk 26, so the adaptive icon covers all
+supported devices. The magenta Live TV tile banner (banner_tv.xml)
+is not the app banner and was left alone.
+
+No new permissions, no new services, no theme-system or remote
+changes, and the v3.21 scroll/focus behavior is untouched (tracker
+half + grid half, Add-show button nextFocusDownId=grid).

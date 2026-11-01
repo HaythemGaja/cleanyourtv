@@ -189,4 +189,33 @@
     <string name="phone_remote_disable">Turn off</string>
     <string name="phone_remote_regenerate">New code</string>
     <string name="phone_remote_revoke">Revoke</string>
+    <!-- Fork v3.22: folders + on-TV lock setup -->
+    <string name="folder_add_to">Add to folder</string>
+    <string name="folder_new_folder">New folder…</string>
+    <string name="folder_already_in">Already in this folder</string>
+    <string name="folder_added">Added to %1$s</string>
+    <string name="folder_remove_member">Remove from folder</string>
+    <string name="folder_removed">Removed from folder</string>
+    <string name="folder_deleted">Folder deleted — apps are back on the home grid</string>
+    <string name="folder_delete">Delete folder</string>
+    <string name="folder_empty_hint">No apps in this folder yet</string>
+    <string name="folder_open">Open folder</string>
+    <string name="folder_rename">Rename</string>
+    <string name="folder_lock">Lock folder</string>
+    <string name="folder_unlock">Unlock folder</string>
+    <string name="folder_locked">Folder locked</string>
+    <string name="folder_unlocked">Folder unlocked</string>
+    <string name="lock_app">Lock app</string>
+    <string name="lock_unlock_app">Unlock app</string>
+    <string name="lock_pin_title">Lock &amp; PIN</string>
+    <string name="lock_pin_status">%1$d apps locked · %2$s</string>
+    <string name="lock_pin_code_set">code set</string>
+    <string name="lock_pin_code_not_set">no code set</string>
+    <string name="lock_pin_no_code">No code is set</string>
+    <string name="lock_pin_set_change">Set / change arrow code</string>
+    <string name="lock_pin_clear">Clear arrow code</string>
+    <string name="lock_pin_saved">Code saved</string>
+    <string name="lock_pin_cleared">Code cleared</string>
+    <string name="lock_pin_locked">App locked</string>
+    <string name="lock_pin_unlocked">App unlocked</string>
 </resources>

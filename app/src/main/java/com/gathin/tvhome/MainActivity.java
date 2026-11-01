@@ -3,6 +3,7 @@ package com.gathin.tvhome;
 import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
@@ -64,6 +65,7 @@ import android.view.Window;
 import android.view.animation.AnimationUtils;
 import android.view.animation.LayoutAnimationController;
 import android.widget.FrameLayout;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
@@ -1129,6 +1131,246 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 });
     }
 
+    // Fork: folders + on-TV lock setup (v3.22). Folder definitions live in the fork-owned
+    // ForkState file, never in Sreeb prefs; only the locked-apps set and the arrow code are
+    // written back into Sreeb prefs (deliberate, so locks stay consistent if the user returns
+    // to Sreeb). The open-folder dialog is a transient Dialog, not a second activity.
+
+    private List<FolderCodec.Folder> loadFolders() {
+        return FolderCodec.decode(new ForkState(this).foldersRaw());
+    }
+
+    private void saveFolders(List<FolderCodec.Folder> folders) {
+        new ForkState(this).setFoldersRaw(FolderCodec.encode(folders));
+    }
+
+    private Dialog openFolderDialog;
+
+    @Override public void onFolderRequested(String folderId) {
+        openFolder(folderId);
+    }
+
+    /** Folder open gate (v3.22): locked + code set -> prompt; locked + no code -> set-pattern flow,
+     *  then REQUIRE the new code (unlike the app gate's setup-then-open, because a folder with no
+     *  code is a setup accident, not a legacy lock); unlocked or master off -> open; grace passes. */
+    private void openFolder(String folderId) {
+        List<FolderCodec.Folder> folders = loadFolders();
+        FolderCodec.Folder folder = FolderCodec.find(folders, folderId);
+        if (folder == null) return;
+        if (folder.locked && forkSreebPrefs != null && forkSreebPrefs.remoteFolderLockEnabled()) {
+            String stored = forkSreebPrefs.arrowPin();
+            if (stored == null || stored.isEmpty() || !ArrowLock.isValidEncoded(stored)) {
+                if (stored != null && !stored.isEmpty()) forkSreebPrefs.setArrowPin("");
+                ArrowDialog.showSetup(this, getString(R.string.lock_set_title, folder.name),
+                        new ArrowDialog.SetupCallback() {
+                            @Override public void onDone(String seq) {
+                                forkSreebPrefs.setArrowPin(seq);
+                                showUnlockGate(folder.name, seq, () -> showFolderDialog(folderId));
+                            }
+                            @Override public void onCancel() {}
+                        });
+                return;
+            }
+            if (ArrowLock.withinGrace(forkSreebPrefs.unlockGraceMinutes(), forkSreebPrefs.lastUnlockAt(),
+                    System.currentTimeMillis())) {
+                showFolderDialog(folderId);
+                return;
+            }
+            showUnlockGate(folder.name, stored, () -> showFolderDialog(folderId));
+            return;
+        }
+        showFolderDialog(folderId);
+    }
+
+    private void showFolderDialog(String folderId) {
+        List<FolderCodec.Folder> folders = loadFolders();
+        FolderCodec.Folder folder = FolderCodec.find(folders, folderId);
+        if (folder == null) return;
+        // Prune stale members (uninstalled apps) on open and persist the prune.
+        PackageManager pm = getPackageManager();
+        List<String> pruned = new ArrayList<>();
+        for (String pkg : folder.members) {
+            try {
+                pm.getApplicationInfo(pkg, 0);
+                pruned.add(pkg);
+            } catch (Exception ignored) {
+            }
+        }
+        if (pruned.size() != folder.members.size()) {
+            folders = FolderCodec.setFolderMembers(folders, folderId, pruned);
+            saveFolders(folders);
+            folder = FolderCodec.find(folders, folderId);
+            if (folder == null) return;
+        }
+        List<FolderDialog.Member> members = new ArrayList<>();
+        for (String pkg : folder.members) {
+            try {
+                ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                String label = String.valueOf(pm.getApplicationLabel(ai));
+                Drawable icon = pm.getApplicationIcon(ai);
+                members.add(new FolderDialog.Member(pkg, label, icon, null));
+            } catch (Exception ignored) {
+            }
+        }
+        openFolderDialog = FolderDialog.show(this, folder.name, members, COLUMNS, new FolderDialog.Listener() {
+            @Override public void onMemberClick(FolderDialog.Member m) {
+                if (openFolderDialog != null) openFolderDialog.dismiss();
+                launchFolderMember(m);
+            }
+
+            @Override public void onMemberLongPress(FolderDialog.Member m) {
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle(m.label)
+                        .setItems(new String[]{getString(R.string.folder_remove_member)},
+                                (d, which) -> {
+                                    List<FolderCodec.Folder> f = FolderCodec.removeFromFolder(loadFolders(), folderId, m.pkg);
+                                    saveFolders(f);
+                                    reloadApps(false);
+                                    if (openFolderDialog != null) openFolderDialog.dismiss();
+                                    showFolderDialog(folderId);
+                                    Toast.makeText(MainActivity.this, R.string.folder_removed, Toast.LENGTH_SHORT).show();
+                                })
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+            }
+        }, () -> {
+            openFolderDialog = null;
+            int pos = adapter.positionOf("folder/folder:" + folderId);
+            if (pos >= 0) focusTile(pos);
+        });
+    }
+
+    /** Launch a folder member through the same app-lock gate as a home tile. */
+    private void launchFolderMember(FolderDialog.Member m) {
+        gateLaunch(m.pkg, m.label, () -> {
+            Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                    .setPackage(m.pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            if (i.resolveActivity(getPackageManager()) == null) {
+                i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                        .setPackage(m.pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            }
+            open(i);
+        });
+    }
+
+    private void showFolderMenu(int position, View card, String folderId) {
+        List<FolderCodec.Folder> folders = loadFolders();
+        FolderCodec.Folder folder = FolderCodec.find(folders, folderId);
+        if (folder == null) return;
+        View panel = getLayoutInflater().inflate(R.layout.popup_inputs, null);
+        PopupWindow popup = new PopupWindow(panel, ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT, true);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        addSettingsMenuRow(rows, popup, R.string.folder_open, () -> openFolder(folderId));
+        addSettingsMenuRow(rows, popup, R.string.folder_rename, () -> renameFolderDialog(folderId));
+        addSettingsMenuRow(rows, popup, folder.locked ? R.string.folder_unlock : R.string.folder_lock,
+                () -> toggleFolderLock(folderId));
+        addSettingsMenuRow(rows, popup, R.string.folder_delete, () -> {
+            saveFolders(FolderCodec.deleteFolder(loadFolders(), folderId));
+            reloadApps(false);
+            Toast.makeText(this, R.string.folder_deleted, Toast.LENGTH_SHORT).show();
+        });
+        panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        int[] loc = new int[2];
+        card.getLocationOnScreen(loc);
+        int below = loc[1] + card.getHeight();
+        popup.showAtLocation(panel, Gravity.NO_GRAVITY, loc[0],
+                below + panel.getMeasuredHeight() < getResources().getDisplayMetrics().heightPixels
+                        ? below : loc[1] - panel.getMeasuredHeight());
+    }
+
+    private void renameFolderDialog(String folderId) {
+        List<FolderCodec.Folder> folders = loadFolders();
+        FolderCodec.Folder folder = FolderCodec.find(folders, folderId);
+        if (folder == null) return;
+        EditText input = new EditText(this);
+        input.setText(folder.name);
+        input.selectAll();
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.folder_rename)
+                .setView(input)
+                .setPositiveButton(R.string.folder_rename, (d, which) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) return;
+                    saveFolders(FolderCodec.renameFolder(loadFolders(), folderId, name));
+                    reloadApps(false);
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void toggleFolderLock(String folderId) {
+        List<FolderCodec.Folder> folders = loadFolders();
+        FolderCodec.Folder folder = FolderCodec.find(folders, folderId);
+        if (folder == null) return;
+        saveFolders(FolderCodec.setFolderLocked(folders, folderId, !folder.locked));
+        reloadApps(false);
+        Toast.makeText(this, folder.locked ? R.string.folder_unlocked : R.string.folder_locked,
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /** Tile-menu "Add to folder": MOVE semantics — the app leaves any other folder first. */
+    private void showAddToFolder(String pkg) {
+        List<FolderCodec.Folder> folders = loadFolders();
+        List<String> names = new ArrayList<>();
+        for (FolderCodec.Folder f : folders) names.add(f.name);
+        names.add(getString(R.string.folder_new_folder));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.folder_add_to)
+                .setItems(names.toArray(new String[0]), (d, which) -> {
+                    List<FolderCodec.Folder> current = loadFolders();
+                    if (which < current.size()) {
+                        FolderCodec.Folder target = current.get(which);
+                        if (target.members.contains(pkg)) {
+                            Toast.makeText(this, R.string.folder_already_in, Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        saveFolders(FolderCodec.addToFolder(current, target.id, pkg));
+                        reloadApps(false);
+                        Toast.makeText(this, getString(R.string.folder_added, target.name), Toast.LENGTH_SHORT).show();
+                    } else {
+                        saveFolders(FolderCodec.createFolder(current, pkg));
+                        reloadApps(false);
+                        Toast.makeText(this, getString(R.string.folder_added, FolderCodec.nextFolderName(current)),
+                                Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /** Tile-menu Lock/Unlock app. Locking with no code set forces the set-pattern flow first,
+     *  then applies the lock — never a locked app with no code. */
+    private void toggleAppLock(String pkg, String label) {
+        if (forkSreebPrefs == null) return;
+        Set<String> locked = new HashSet<>(forkSreebPrefs.lockedApps());
+        if (locked.contains(pkg)) {
+            locked.remove(pkg);
+            forkSreebPrefs.setLockedApps(locked);
+            Toast.makeText(this, R.string.lock_pin_unlocked, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String stored = forkSreebPrefs.arrowPin();
+        if (stored == null || stored.isEmpty() || !ArrowLock.isValidEncoded(stored)) {
+            if (stored != null && !stored.isEmpty()) forkSreebPrefs.setArrowPin("");
+            ArrowDialog.showSetup(this, getString(R.string.lock_set_title, label),
+                    new ArrowDialog.SetupCallback() {
+                        @Override public void onDone(String seq) {
+                            forkSreebPrefs.setArrowPin(seq);
+                            Set<String> s = new HashSet<>(forkSreebPrefs.lockedApps());
+                            s.add(pkg);
+                            forkSreebPrefs.setLockedApps(s);
+                            Toast.makeText(MainActivity.this, R.string.lock_pin_locked, Toast.LENGTH_SHORT).show();
+                        }
+                        @Override public void onCancel() {}
+                    });
+            return;
+        }
+        locked.add(pkg);
+        forkSreebPrefs.setLockedApps(locked);
+        Toast.makeText(this, R.string.lock_pin_locked, Toast.LENGTH_SHORT).show();
+    }
+
     /**
      * handle_view_inputs: switch InputsRequestActivity, the VIEW_INPUTS handler, on or off. It is disabled in the
      * manifest, so a TV with its own input picker never sees it; only the sets that need it turn it on. Written
@@ -1401,6 +1643,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0);
         cards = moduleCards ? CardFeature.run(() -> Cards.discover(this, hiddenApps,
                 () -> Cards.load(Cards.storeFile(this)), leanback), none) : none;
+        adapter.setFolderDefs(loadFolders());
         adapter.reload(cards.isEmpty() ? none : CardFeature.run(() -> Cards.shown(cards), none), leanback);
         lastFocusedKey = returnKey;
         lastFocused = returnSlot;
@@ -3934,6 +4177,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         String pkg = adapter.packageAt(position);
         // Empty dock slots and the Default-home tile carry the launcher's own package: no menu for them.
         if (key == null || pkg == null || pkg.equals(getPackageName())) return;
+        // Fork v3.22: a folder tile gets its own menu (open/rename/lock/delete), never the app menu.
+        if (adapter.entryKindAt(position) == AppAdapter.Entry.FOLDER) {
+            String folderId = adapter.folderIdAt(position);
+            if (folderId != null) showFolderMenu(position, card, folderId);
+            return;
+        }
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
         PopupWindow popup = glassPopup(panel, (int) (200 * density));
@@ -3957,6 +4206,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // Some firmware has no App info page at all; a row that only toasts "can't open" helps nobody.
         Intent info = SystemSettings.appInfo(this, pkg);
         if (info != null) addSettingsMenuRow(rows, popup, R.string.library_app_info, () -> open(info));
+        // Fork v3.22: folder + lock rows on app tiles (cards too — they stand in for the app).
+        if (adapter.entryKindAt(position) == AppAdapter.Entry.APP || adapter.entryKindAt(position) == AppAdapter.Entry.CARD) {
+            addSettingsMenuRow(rows, popup, R.string.folder_add_to, () -> showAddToFolder(pkg));
+            if (forkSreebPrefs != null) {
+                boolean locked = forkSreebPrefs.lockedApps().contains(pkg);
+                addSettingsMenuRow(rows, popup, locked ? R.string.lock_unlock_app : R.string.lock_app,
+                        () -> toggleAppLock(pkg, adapter.labelAt(position)));
+            }
+        }
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         popup.setWidth(Math.max((int) (200 * density), panel.getMeasuredWidth()));
         // Dock tiles sit near the bottom of the screen: open the menu above the tile when it would not fit below.

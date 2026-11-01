@@ -11,9 +11,9 @@ android {
         applicationId providers.gradleProperty('launcherApplicationId').getOrElse('com.gathin.tvhome')
         minSdk 26
         targetSdk 34
-        // Fork: versionCode 44 / 3.21 — scrollable home fix above Sreeb v3.20 (vc43).
-        versionCode 44
-        versionName '3.21'
+        // Fork: versionCode 45 / 3.22 — folders + on-TV lock setup + Sreeb icon, above v3.21 (vc44).
+        versionCode 45
+        versionName '3.22'
     }
 
     signingConfigs {

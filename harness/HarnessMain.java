@@ -1,8 +1,12 @@
 package com.gathin.tvhome;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +46,8 @@ public final class HarnessMain {
         store();
         theme(args.length > 0 ? args[0] : null);
         layout();
+        folders();
+        prefsRoundTrip();
         System.out.println("RESULT passed=" + passed + " failed=" + failed);
         if (failed > 0) System.exit(1);
     }
@@ -519,6 +525,217 @@ public final class HarnessMain {
         SreebCodecs.EpisodeFile fresh = st.readEpisode(4L);
         check("store fresh episode file", fresh != null && fresh.watched.contains("1x1"));
         deleteRecursively(tmp);
+    }
+
+    // ---------------- v3.22 folders + lock setup ----------------
+
+    /** FolderCodec.Folder takes (id, name) only; members/locked are set on the instance. */
+    private static FolderCodec.Folder mkFolder(String id, String name, List<String> members, boolean locked) {
+        FolderCodec.Folder f = new FolderCodec.Folder(id, name);
+        if (members != null) f.members.addAll(members);
+        f.locked = locked;
+        return f;
+    }
+
+    private static void folders() {
+        List<FolderCodec.Folder> base = new ArrayList<>();
+        base.add(mkFolder("f1", "Games", Arrays.asList("com.a", "com.b"), false));
+        base.add(mkFolder("f2", "Vid|eo\n100% ★", Arrays.asList("com.c"), true));
+        String raw = FolderCodec.encode(base);
+        List<FolderCodec.Folder> back = FolderCodec.decode(raw);
+        checkEq("folder round-trip re-encodes identically", raw, FolderCodec.encode(back));
+        checkEq("folder round-trip name with pipe/newline/%/unicode",
+                "Vid|eo\n100% ★", FolderCodec.find(back, "f2").name);
+        check("folder round-trip locked flag", FolderCodec.find(back, "f2").locked);
+        checkEq("folder round-trip member order", Arrays.asList("com.a", "com.b"),
+                FolderCodec.find(back, "f1").members);
+
+        // Corrupt data fails open: bad lines dropped, good lines kept, never a crash.
+        String dirty = raw + "\nbrokenline\n|bad|\n" + "f9||0|com.z\n";
+        List<FolderCodec.Folder> kept = FolderCodec.decode(dirty);
+        checkEq("folder corrupt lines dropped, good kept", 3, kept.size());
+        check("folder empty id dropped", FolderCodec.find(kept, "") == null);
+        check("folder empty name becomes Folder",
+                FolderCodec.find(kept, "f9") != null && "Folder".equals(FolderCodec.find(kept, "f9").name));
+        checkEq("folder decode null is empty", 0, FolderCodec.decode(null).size());
+        checkEq("folder decode empty is empty", 0, FolderCodec.decode("").size());
+
+        checkEq("folder foldered set", new HashSet<>(Arrays.asList("com.a", "com.b", "com.c")),
+                FolderCodec.folderedPackages(base));
+        checkEq("folder next name smallest unused", "Folder 2",
+                FolderCodec.nextFolderName(Arrays.asList(
+                        mkFolder("f1", "Folder 1", new ArrayList<>(), false),
+                        mkFolder("f3", "Folder 3", new ArrayList<>(), false))));
+        checkEq("folder create picks smallest unused id", "f2",
+                FolderCodec.createFolder(Arrays.asList(
+                        mkFolder("f1", "A", new ArrayList<>(), false),
+                        mkFolder("f3", "B", new ArrayList<>(), false)), "com.z")
+                        .get(2).id);
+
+        // MOVE semantics: adding com.a to f2 removes it from f1; duplicates never appear.
+        List<FolderCodec.Folder> moved = FolderCodec.addToFolder(base, "f2", "com.a");
+        check("folder move removes from old folder", !FolderCodec.find(moved, "f1").members.contains("com.a"));
+        check("folder move adds to new folder", FolderCodec.find(moved, "f2").members.contains("com.a"));
+        List<FolderCodec.Folder> dup = FolderCodec.addToFolder(moved, "f2", "com.a");
+        checkEq("folder add duplicate is a no-op", FolderCodec.find(moved, "f2").members,
+                FolderCodec.find(dup, "f2").members);
+        List<FolderCodec.Folder> created = FolderCodec.createFolder(base, "com.d");
+        checkEq("folder create name", "Folder 1", created.get(created.size() - 1).name);
+        check("folder create first member", created.get(created.size() - 1).members.contains("com.d"));
+
+        List<FolderCodec.Folder> removed = FolderCodec.removeFromFolder(base, "f1", "com.a");
+        checkEq("folder remove leaves rest", Arrays.asList("com.b"), FolderCodec.find(removed, "f1").members);
+        List<FolderCodec.Folder> renamed = FolderCodec.renameFolder(base, "f1", "  Arcade  ");
+        checkEq("folder rename trims", "Arcade", FolderCodec.find(renamed, "f1").name);
+        checkEq("folder rename blank ignored", "Games",
+                FolderCodec.find(FolderCodec.renameFolder(base, "f1", "   "), "f1").name);
+        List<FolderCodec.Folder> locked = FolderCodec.setFolderLocked(base, "f1", true);
+        check("folder set locked", FolderCodec.find(locked, "f1").locked);
+        List<FolderCodec.Folder> pruned = FolderCodec.setFolderMembers(base, "f1", Arrays.asList("com.b", "com.b", null, ""));
+        checkEq("folder prune dedupes", Arrays.asList("com.b"), FolderCodec.find(pruned, "f1").members);
+        List<FolderCodec.Folder> deleted = FolderCodec.deleteFolder(base, "f2");
+        check("folder delete removes folder", FolderCodec.find(deleted, "f2") == null);
+        check("folder delete keeps others", FolderCodec.find(deleted, "f1") != null);
+
+        // App-lock membership toggle (pure half).
+        Set<String> toggled = FolderCodec.toggleLocked(new HashSet<>(Arrays.asList("com.a")), "com.b");
+        check("folder toggleLocked adds", toggled.contains("com.a") && toggled.contains("com.b"));
+        check("folder toggleLocked removes",
+                !FolderCodec.toggleLocked(toggled, "com.a").contains("com.a"));
+
+        // Folder lock gate matrix (dormant folderGate code, now live).
+        checkEq("folder gate locked+code prompts", ArrowLock.FolderGate.PROMPT_PATTERN,
+                ArrowLock.folderGate(true, true));
+        checkEq("folder gate locked+nocode setups", ArrowLock.FolderGate.PROMPT_SET_PATTERN,
+                ArrowLock.folderGate(true, false));
+        checkEq("folder gate unlocked opens", ArrowLock.FolderGate.OPEN, ArrowLock.folderGate(false, false));
+        check("folder gate master off opens", !ArrowLock.folderRequiresPrompt(true, false));
+        check("folder gate master on + locked prompts", ArrowLock.folderRequiresPrompt(true, true));
+        check("folder gate master on + unlocked opens", !ArrowLock.folderRequiresPrompt(false, true));
+        check("app gate master off opens", !ArrowLock.appRequiresPrompt(true, false));
+        check("app gate master on + locked prompts", ArrowLock.appRequiresPrompt(true, true));
+        // Grace window is shared with the app gate (no second grace invented).
+        check("grace zero minutes never passes",
+                !ArrowLock.withinGrace(0, System.currentTimeMillis(), System.currentTimeMillis()));
+        check("grace window passes inside window",
+                ArrowLock.withinGrace(5, System.currentTimeMillis() - 60_000L, System.currentTimeMillis()));
+        check("grace window expires",
+                !ArrowLock.withinGrace(5, System.currentTimeMillis() - 6 * 60_000L, System.currentTimeMillis()));
+    }
+
+    private static void prefsRoundTrip() {
+        FakeContext ctx = new FakeContext();
+        ctx.preload("mizan_launcher", "current_profile", 1);
+        ctx.preload("mizan_launcher", "p1.locked", new HashSet<>(Arrays.asList("com.a")));
+        ctx.preload("mizan_launcher", "arrow_pin", "UDLR");
+        ctx.preload("mizan_launcher", "launcher_tmdb_key", "SECRET");
+        ctx.preload("mizan_launcher", "p1.layout", "x");
+        SreebPrefs prefs = new SreebPrefs(ctx);
+        checkEq("prefs locked read back", new HashSet<>(Arrays.asList("com.a")), prefs.lockedApps());
+        Map<String, ?> before = new HashMap<>(ctx.files.get("mizan_launcher").map);
+        prefs.setLockedApps(new HashSet<>(Arrays.asList("com.a", "com.b")));
+        checkEq("prefs locked write read back",
+                new HashSet<>(Arrays.asList("com.a", "com.b")), new SreebPrefs(ctx).lockedApps());
+        Map<String, ?> after = ctx.files.get("mizan_launcher").map;
+        boolean onlyLockedChanged = after.size() == before.size();
+        if (onlyLockedChanged) {
+            for (Map.Entry<String, ?> e : before.entrySet()) {
+                if (!e.getKey().equals("p1.locked") && !e.getValue().equals(after.get(e.getKey()))) {
+                    onlyLockedChanged = false;
+                }
+            }
+        }
+        check("prefs locked write touches only p1.locked", onlyLockedChanged);
+        checkEq("prefs arrow code untouched by locked write", "UDLR", prefs.arrowPin());
+        prefs.setArrowPin("RULD");
+        checkEq("prefs arrow code write read back", "RULD", new SreebPrefs(ctx).arrowPin());
+        checkEq("prefs tmdb key untouched", "SECRET",
+                ctx.files.get("mizan_launcher").map.get("launcher_tmdb_key"));
+
+        // Fork-owned folder store: round-trip + wrong-type fail-open, never in Sreeb's file.
+        ForkState state = new ForkState(ctx);
+        String raw = FolderCodec.encode(Arrays.asList(
+                mkFolder("f1", "Games", Arrays.asList("com.a"), false)));
+        state.setFoldersRaw(raw);
+        checkEq("forkstate folders round-trip", raw, new ForkState(ctx).foldersRaw());
+        ctx.preload("clean_fork_state", "folders", 42);
+        checkEq("forkstate folders wrong type fails open", "", new ForkState(ctx).foldersRaw());
+        check("forkstate folders never in sreeb file",
+                !ctx.files.get("mizan_launcher").map.containsKey("folders"));
+    }
+
+    // In-memory SharedPreferences/Context for the prefs checks above.
+    private static final class FakePrefs implements SharedPreferences {
+        final Map<String, Object> map = new HashMap<>();
+
+        private Object typed(String key, Class<?> want, Object def) {
+            Object v = map.get(key);
+            if (v == null) return def;
+            if (!want.isInstance(v)) throw new ClassCastException(key);
+            return v;
+        }
+
+        @Override public String getString(String key, String def) {
+            return (String) typed(key, String.class, def);
+        }
+
+        @Override @SuppressWarnings("unchecked")
+        public Set<String> getStringSet(String key, Set<String> def) {
+            Object v = typed(key, Set.class, def);
+            return v == null ? def : new HashSet<>((Set<String>) v);
+        }
+
+        @Override public int getInt(String key, int def) {
+            Object v = typed(key, Integer.class, null);
+            return v == null ? def : (Integer) v;
+        }
+
+        @Override public long getLong(String key, long def) {
+            Object v = typed(key, Long.class, null);
+            return v == null ? def : (Long) v;
+        }
+
+        @Override public boolean getBoolean(String key, boolean def) {
+            Object v = typed(key, Boolean.class, null);
+            return v == null ? def : (Boolean) v;
+        }
+
+        @Override public Map<String, ?> getAll() {
+            return new HashMap<>(map);
+        }
+
+        @Override public Editor edit() {
+            return new Editor() {
+                final Map<String, Object> pending = new HashMap<>();
+
+                @Override public Editor putString(String k, String v) { pending.put(k, v); return this; }
+                @Override public Editor putStringSet(String k, Set<String> v) { pending.put(k, new HashSet<>(v)); return this; }
+                @Override public Editor putInt(String k, int v) { pending.put(k, v); return this; }
+                @Override public Editor putLong(String k, long v) { pending.put(k, v); return this; }
+                @Override public Editor putBoolean(String k, boolean v) { pending.put(k, v); return this; }
+                @Override public Editor remove(String k) { pending.put(k, null); return this; }
+                @Override public Editor clear() { map.clear(); pending.clear(); return this; }
+                @Override public void apply() {
+                    for (Map.Entry<String, Object> e : pending.entrySet()) {
+                        if (e.getValue() == null) map.remove(e.getKey());
+                        else map.put(e.getKey(), e.getValue());
+                    }
+                }
+                @Override public boolean commit() { apply(); return true; }
+            };
+        }
+    }
+
+    private static final class FakeContext extends Context {
+        final Map<String, FakePrefs> files = new HashMap<>();
+
+        void preload(String file, String key, Object value) {
+            files.computeIfAbsent(file, f -> new FakePrefs()).map.put(key, value);
+        }
+
+        @Override public SharedPreferences getSharedPreferences(String name, int mode) {
+            return files.computeIfAbsent(name, f -> new FakePrefs());
+        }
     }
 
     private static void deleteRecursively(File f) {
