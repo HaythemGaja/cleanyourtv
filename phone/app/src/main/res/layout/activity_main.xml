@@ -36,6 +36,26 @@
             android:layout_marginTop="8dp"
             android:text="@string/connect" />
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/scan"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/scan" />
+
+            <Button
+                android:id="@+id/saved"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/saved" />
+        </LinearLayout>
+
         <TextView
             android:id="@+id/status"
             android:layout_width="match_parent"
@@ -166,6 +186,33 @@
                 android:text="@string/volume_up" />
         </LinearLayout>
 
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/apps"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/apps" />
+
+            <Button
+                android:id="@+id/health"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/health" />
+
+            <Button
+                android:id="@+id/screen"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/screen" />
+        </LinearLayout>
+
         <EditText
             android:id="@+id/text"
             android:layout_width="match_parent"
@@ -181,5 +228,22 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/send" />
+
+        <TextView
+            android:id="@+id/health_line"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/accent"
+            android:visibility="gone" />
+
+        <ImageView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:adjustViewBounds="true"
+            android:contentDescription="@string/screen"
+            android:visibility="gone" />
     </LinearLayout>
 </ScrollView>

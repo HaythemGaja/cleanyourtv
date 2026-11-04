@@ -30,8 +30,21 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 `testReleaseUnitTest` checks the Adb framing, the public key struct and the text escaping on a plain JVM.
 
+## What it does
+
+- A D-pad, OK, Back, Home, volume and power, sent as key events. A long press on Back sends three.
+- **Scan** finds TVs announcing Adb on the home network - `_adb._tcp` for network debugging on 5555,
+  `_adb-tls-connect._tcp` for Android 11's Wireless debugging and its own port - so an address is never typed.
+- **Saved TVs** keeps every set it has connected to, newest first, and switches with one tap.
+- Reconnects by itself: three tries on connect, and a press after the TV slept reopens the connection.
+- **Apps** lists the TV's own third-party apps and launches one directly, without walking Home's grid.
+- **Health** shows uptime, free memory and free storage, which is the answer to "why is it slow".
+- **Screen** shows a frame of what the TV has on it, refreshed while it is open.
+
 ## What it cannot do
 
+- Text that `input text` cannot send is dropped: Hebrew, Arabic and emoji need an input method on the TV that
+  accepts them, and this app does not install one.
 - It is a remote, not a second launcher: apps open on the TV, not on the phone.
 - A locked tile still asks for its arrow pattern on the TV. The phone sends arrows, so it can draw the pattern
   like any remote, and nothing here stores it.

@@ -21,4 +21,18 @@
     <string name="power">Power</string>
     <string name="volume_up">Vol +</string>
     <string name="volume_down">Vol −</string>
+    <string name="scan">Scan</string>
+    <string name="saved">Saved TVs</string>
+    <string name="apps">Apps</string>
+    <string name="health">Health</string>
+    <string name="screen">Screen</string>
+    <string name="scanning">Looking for TVs on this network…</string>
+    <string name="no_tvs_found">No TV answered. Turn on network debugging in the TV\'s Developer options.</string>
+    <string name="tvs_found">%1$d TVs found</string>
+    <string name="no_saved">No TV saved yet: connect to one first.</string>
+    <string name="forget">Forget all saved TVs</string>
+    <string name="forgot">Saved TVs forgotten</string>
+    <string name="apps_loading">Reading the TV\'s apps…</string>
+    <string name="no_apps">No launchable app found.</string>
+    <string name="health_reading">Reading the TV\'s health…</string>
 </resources>
